@@ -311,6 +311,8 @@ def main():
     # 输出
     to_docx(result, OUTPUT_FILE)
     print(f"\n📄 Word文档已生成：{OUTPUT_FILE}")
+    print("\n按回车键退出...")
+    input()
 
 
 if __name__ == "__main__":
