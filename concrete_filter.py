@@ -397,11 +397,14 @@ class App:
                 # 文件夹批量处理
                 self.log(f"📁 检测到文件夹：{input_path}")
                 supported_ext = ['.xlsx', '.xls', '.csv', '.docx', '.doc']
-                files = [os.path.join(input_path, f) for f in os.listdir(input_path)
-                         if any(f.lower().endswith(ext) for ext in supported_ext)]
+                files = []
+                for root, dirs, files_in_dir in os.walk(input_path):
+                    for f in files_in_dir:
+                        if any(f.lower().endswith(ext) for ext in supported_ext):
+                            files.append(os.path.join(root, f))
 
                 if not files:
-                    raise Exception(f"文件夹中未找到支持的数据文件(.xlsx/.xls/.csv/.docx/.doc)")
+                    raise Exception(f"文件夹及子文件夹中未找到支持的数据文件(.xlsx/.xls/.csv/.docx/.doc)")
 
                 self.log(f"   找到 {len(files)} 个数据文件\n")
 
