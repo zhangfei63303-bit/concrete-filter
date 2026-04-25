@@ -168,7 +168,7 @@ class App:
         frame_file = ttk.LabelFrame(self.root, text="文件选择", padding=10)
         frame_file.pack(fill="x", padx=10, pady=5)
 
-        ttk.Label(frame_file, text="数据文件：").grid(row=0, column=0, sticky="w")
+        ttk.Label(frame_file, text="数据文件/文件夹：").grid(row=0, column=0, sticky="w")
         ttk.Entry(frame_file, textvariable=self.input_file, width=50).grid(row=0, column=1, padx=5)
         ttk.Button(frame_file, text="浏览...", command=self.browse_input).grid(row=0, column=2)
 
@@ -225,15 +225,24 @@ class App:
         self.status_text.pack(fill="both", expand=True)
 
     def browse_input(self):
+        # 允许选择文件或文件夹
         fname = filedialog.askopenfilename(
-            title="选择数据文件",
+            title="选择数据文件或文件夹",
             filetypes=[("Excel文件", "*.xlsx *.xls"), ("CSV文件", "*.csv"), ("Word文件", "*.docx"), ("所有文件", "*.*")]
         )
-        if fname:
-            self.input_file.set(fname)
-            if not self.output_file.get() or self.output_file.get() == "output.docx":
-                base = os.path.splitext(os.path.basename(fname))[0]
-                self.output_file.set(f"{base}_筛选结果.docx")
+        if not fname:
+            # 如果点了取消，尝试选文件夹
+            dname = filedialog.askdirectory(title="选择包含数据文件的文件夹")
+            if dname:
+                self.input_file.set(dname)
+                if not self.output_file.get() or self.output_file.get() == "output.docx":
+                    self.output_file.set("混凝土试件筛选结果.docx")
+            return
+        
+        self.input_file.set(fname)
+        if not self.output_file.get() or self.output_file.get() == "output.docx":
+            base = os.path.splitext(os.path.basename(fname))[0]
+            self.output_file.set(f"{base}_筛选结果.docx")
 
     def browse_output(self):
         fname = filedialog.asksaveasfilename(
@@ -269,6 +278,84 @@ class App:
         self.status_text.config(state="disabled")
 
         try:
+            # 判断是文件还是文件夹
+        if os.path.isdir(input_path):
+            # 文件夹：扫描所有支持的文件
+            self.log(f"📁 检测到文件夹：{input_path}")
+            supported_ext = ['.xlsx', '.xls', '.csv', '.docx']
+            files = []
+            for f in os.listdir(input_path):
+                if any(f.lower().endswith(ext) for ext in supported_ext):
+                    files.append(os.path.join(input_path, f))
+            
+            if not files:
+                raise Exception(f"文件夹中未找到支持的数据文件（.xlsx/.xls/.csv/.docx）")
+            
+            self.log(f"   找到 {len(files)} 个数据文件")
+            self.log("")
+            
+            all_results = []
+            all_columns = None
+            
+            for i, fpath in enumerate(files, 1):
+                self.log(f"[{i}/{len(files)}] 处理：{os.path.basename(fpath)}")
+                
+                ext = os.path.splitext(fpath)[1].lower()
+                if ext in [".xlsx", ".xls"]:
+                    import pandas as pd
+                    df = read_excel(fpath)
+                elif ext == ".csv":
+                    import pandas as pd
+                    df = read_csv(fpath)
+                elif ext == ".docx":
+                    import pandas as pd
+                    df = read_docx(fpath)
+                    if df is None:
+                        self.log(f"   ⚠️ 跳过（未找到表格数据）")
+                        continue
+                else:
+                    continue
+                
+                self.log(f"   共 {len(df)} 行数据")
+                
+                # 列名标准化
+                col_map = {col: col.strip().replace(" ", "").replace("\n", "") for col in df.columns}
+                df = df.rename(columns=col_map)
+                
+                if all_columns is None:
+                    all_columns = df.columns
+                
+                results = filter_data(
+                    df,
+                    self.date_start.get(),
+                    self.date_end.get(),
+                    self.age_min.get(),
+                    self.age_max.get(),
+                    self.site_name.get(),
+                    self.grade.get(),
+                    self.pour_part.get()
+                )
+                
+                self.log(f"   符合条件：{len(results)} 条")
+                all_results.extend(results)
+            
+            self.log(f"\n📊 共筛选出 {len(all_results)} 条记录")
+            
+            # 获取列名
+            date_col = next((c for c in all_columns if "制作" in c and "日期" in c), None)
+            age_col = next((c for c in all_columns if "龄期" in c), None)
+            site_col = next((c for c in all_columns if "工地" in c), None)
+            grade_col = next((c for c in all_columns if "等级" in c), None)
+            pour_col = next((c for c in all_columns if "浇筑" in c or "部位" in c), None)
+            
+            to_docx(all_results, output_path, all_columns, date_col, age_col, site_col, grade_col, pour_col)
+            
+            self.log(f"\n✅ 完成！")
+            self.log(f"📄 结果已保存：{output_path}")
+            messagebox.showinfo("完成", f"筛选完成！\n\n共处理 {len(files)} 个文件\n合计找到 {len(all_results)} 条记录\n\n已保存到：{output_path}")
+        
+        else:
+            # 单文件处理
             self.log(f"📖 读取文件：{input_path}")
 
             ext = os.path.splitext(input_path)[1].lower()
