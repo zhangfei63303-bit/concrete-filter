@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 混凝土试件记录筛选工具 - 可视化界面版
+支持单文件和文件夹批量处理
 """
 
 import os
@@ -9,7 +10,8 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from datetime import datetime
 
-# ========== 筛选条件（默认参数） ==========
+
+# ========== 默认筛选参数 ==========
 DEFAULT_AGE_MIN = 50
 DEFAULT_AGE_MAX = 60
 DEFAULT_DATE_START = ""
@@ -44,9 +46,11 @@ def read_excel(path):
     import pandas as pd
     return pd.read_excel(path)
 
+
 def read_csv(path):
     import pandas as pd
     return pd.read_csv(path)
+
 
 def read_docx(path):
     from docx import Document
@@ -57,8 +61,10 @@ def read_docx(path):
             rows.append([cell.text.strip() for cell in row.cells])
     if not rows:
         return None
+    import pandas as pd
     df = pd.DataFrame(rows[1:], columns=rows[0])
     return df
+
 
 def filter_data(df, date_start, date_end, age_min, age_max, site_name, grade, pour_part):
     col_map = {col: col.strip().replace(" ", "").replace("\n", "") for col in df.columns}
@@ -103,7 +109,7 @@ def filter_data(df, date_start, date_end, age_min, age_max, site_name, grade, po
     return results
 
 
-def to_docx(results, output_path, df_columns, date_col, age_col, site_col, grade_col, pour_col):
+def to_docx(results, output_path, all_columns, date_col, age_col, site_col, grade_col, pour_col):
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
@@ -147,12 +153,11 @@ class App:
     def __init__(self, root):
         self.root = root
         self.root.title("混凝土试件记录筛选工具")
-        self.root.geometry("700x500")
+        self.root.geometry("720x520")
         self.root.resizable(True, True)
 
         self.input_file = tk.StringVar()
         self.output_file = tk.StringVar(value="output.docx")
-
         self.date_start = tk.StringVar(value=DEFAULT_DATE_START)
         self.date_end = tk.StringVar(value=DEFAULT_DATE_END)
         self.age_min = tk.IntVar(value=DEFAULT_AGE_MIN)
@@ -169,12 +174,16 @@ class App:
         frame_file.pack(fill="x", padx=10, pady=5)
 
         ttk.Label(frame_file, text="数据文件/文件夹：").grid(row=0, column=0, sticky="w")
-        ttk.Entry(frame_file, textvariable=self.input_file, width=50).grid(row=0, column=1, padx=5)
+        ttk.Entry(frame_file, textvariable=self.input_file, width=55).grid(row=0, column=1, padx=5)
         ttk.Button(frame_file, text="浏览...", command=self.browse_input).grid(row=0, column=2)
 
         ttk.Label(frame_file, text="输出文件：").grid(row=1, column=0, sticky="w", pady=(5,0))
-        ttk.Entry(frame_file, textvariable=self.output_file, width=50).grid(row=1, column=1, padx=5, pady=(5,0))
+        ttk.Entry(frame_file, textvariable=self.output_file, width=55).grid(row=1, column=1, padx=5, pady=(5,0))
         ttk.Button(frame_file, text="浏览...", command=self.browse_output).grid(row=1, column=2, pady=(5,0))
+
+        ttk.Label(frame_file, text="(可选择文件或整个文件夹，文件夹会自动扫描所有数据文件)").grid(
+            row=2, column=0, columnspan=3, sticky="w", pady=(3,0), padx=2
+        )
 
         # 筛选条件区
         frame_cond = ttk.LabelFrame(self.root, text="筛选条件", padding=10)
@@ -186,7 +195,7 @@ class App:
         ttk.Entry(frame_cond, textvariable=self.date_start, width=12).grid(row=0, column=2, padx=5)
         ttk.Label(frame_cond, text="到").grid(row=0, column=3)
         ttk.Entry(frame_cond, textvariable=self.date_end, width=12).grid(row=0, column=4, padx=5)
-        ttk.Label(frame_cond, text="(留空不限，格式如 2026-01-01)").grid(row=0, column=5, sticky="w", padx=5)
+        ttk.Label(frame_cond, text="(格式如 2026-01-01，留空不限)").grid(row=0, column=5, sticky="w", padx=5)
 
         # 第二行：龄期
         ttk.Label(frame_cond, text="龄期(天)：").grid(row=1, column=0, sticky="w", pady=(5,0))
@@ -194,6 +203,7 @@ class App:
         ttk.Entry(frame_cond, textvariable=self.age_min, width=12).grid(row=1, column=2, padx=5, pady=(5,0))
         ttk.Label(frame_cond, text="到").grid(row=1, column=3, pady=(5,0))
         ttk.Entry(frame_cond, textvariable=self.age_max, width=12).grid(row=1, column=4, padx=5, pady=(5,0))
+        ttk.Label(frame_cond, text="天").grid(row=1, column=5, sticky="w", padx=5, pady=(5,0))
 
         # 第三行：工地名称
         ttk.Label(frame_cond, text="工地名称：").grid(row=2, column=0, sticky="w", pady=(5,0))
@@ -225,20 +235,23 @@ class App:
         self.status_text.pack(fill="both", expand=True)
 
     def browse_input(self):
-        # 允许选择文件或文件夹
         fname = filedialog.askopenfilename(
-            title="选择数据文件或文件夹",
-            filetypes=[("Excel文件", "*.xlsx *.xls"), ("CSV文件", "*.csv"), ("Word文件", "*.docx"), ("所有文件", "*.*")]
+            title="选择数据文件",
+            filetypes=[
+                ("Excel文件", "*.xlsx *.xls"),
+                ("CSV文件", "*.csv"),
+                ("Word文件", "*.docx"),
+                ("所有文件", "*.*")
+            ]
         )
         if not fname:
-            # 如果点了取消，尝试选文件夹
             dname = filedialog.askdirectory(title="选择包含数据文件的文件夹")
             if dname:
                 self.input_file.set(dname)
                 if not self.output_file.get() or self.output_file.get() == "output.docx":
                     self.output_file.set("混凝土试件筛选结果.docx")
             return
-        
+
         self.input_file.set(fname)
         if not self.output_file.get() or self.output_file.get() == "output.docx":
             base = os.path.splitext(os.path.basename(fname))[0]
@@ -260,16 +273,38 @@ class App:
         self.status_text.config(state="disabled")
         self.root.update()
 
+    def process_file(self, fpath, date_start, date_end, age_min, age_max, site_name, grade, pour_part):
+        """处理单个文件，返回 (results, all_columns)"""
+        import pandas as pd
+
+        ext = os.path.splitext(fpath)[1].lower()
+        if ext in [".xlsx", ".xls"]:
+            df = read_excel(fpath)
+        elif ext == ".csv":
+            df = read_csv(fpath)
+        elif ext == ".docx":
+            df = read_docx(fpath)
+            if df is None:
+                return None, None
+        else:
+            return None, None
+
+        col_map = {col: col.strip().replace(" ", "").replace("\n", "") for col in df.columns}
+        df = df.rename(columns=col_map)
+
+        results = filter_data(df, date_start, date_end, age_min, age_max, site_name, grade, pour_part)
+        return results, df.columns
+
     def run_filter(self):
         input_path = self.input_file.get().strip()
         output_path = self.output_file.get().strip()
 
         if not input_path:
-            messagebox.showerror("错误", "请选择数据文件！")
+            messagebox.showerror("错误", "请选择数据文件或文件夹！")
             return
 
         if not os.path.exists(input_path):
-            messagebox.showerror("错误", f"文件不存在：{input_path}")
+            messagebox.showerror("错误", f"路径不存在：{input_path}")
             return
 
         self.btn_run.config(state="disabled", text="处理中...")
@@ -278,134 +313,87 @@ class App:
         self.status_text.config(state="disabled")
 
         try:
+            date_start = self.date_start.get().strip()
+            date_end = self.date_end.get().strip()
+            age_min = self.age_min.get()
+            age_max = self.age_max.get()
+            site_name = self.site_name.get().strip()
+            grade = self.grade.get().strip()
+            pour_part = self.pour_part.get().strip()
+
             # 判断是文件还是文件夹
-        if os.path.isdir(input_path):
-            # 文件夹：扫描所有支持的文件
-            self.log(f"📁 检测到文件夹：{input_path}")
-            supported_ext = ['.xlsx', '.xls', '.csv', '.docx']
-            files = []
-            for f in os.listdir(input_path):
-                if any(f.lower().endswith(ext) for ext in supported_ext):
-                    files.append(os.path.join(input_path, f))
-            
-            if not files:
-                raise Exception(f"文件夹中未找到支持的数据文件（.xlsx/.xls/.csv/.docx）")
-            
-            self.log(f"   找到 {len(files)} 个数据文件")
-            self.log("")
-            
-            all_results = []
-            all_columns = None
-            
-            for i, fpath in enumerate(files, 1):
-                self.log(f"[{i}/{len(files)}] 处理：{os.path.basename(fpath)}")
-                
-                ext = os.path.splitext(fpath)[1].lower()
-                if ext in [".xlsx", ".xls"]:
-                    import pandas as pd
-                    df = read_excel(fpath)
-                elif ext == ".csv":
-                    import pandas as pd
-                    df = read_csv(fpath)
-                elif ext == ".docx":
-                    import pandas as pd
-                    df = read_docx(fpath)
-                    if df is None:
-                        self.log(f"   ⚠️ 跳过（未找到表格数据）")
+            if os.path.isdir(input_path):
+                # 文件夹批量处理
+                self.log(f"📁 检测到文件夹：{input_path}")
+                supported_ext = ['.xlsx', '.xls', '.csv', '.docx']
+                files = [os.path.join(input_path, f) for f in os.listdir(input_path)
+                         if any(f.lower().endswith(ext) for ext in supported_ext)]
+
+                if not files:
+                    raise Exception(f"文件夹中未找到支持的数据文件(.xlsx/.xls/.csv/.docx)")
+
+                self.log(f"   找到 {len(files)} 个数据文件\n")
+
+                all_results = []
+                all_columns = None
+
+                for i, fpath in enumerate(files, 1):
+                    self.log(f"[{i}/{len(files)}] 处理：{os.path.basename(fpath)}")
+                    results, cols = self.process_file(fpath, date_start, date_end, age_min, age_max, site_name, grade, pour_part)
+
+                    if results is None:
+                        self.log(f"   ⚠️ 跳过")
                         continue
+
+                    self.log(f"   共 {len(results)} 条记录")
+                    all_results.extend(results)
+                    if cols is not None and all_columns is None:
+                        all_columns = cols
+
+                self.log(f"\n📊 共筛选出 {len(all_results)} 条记录")
+
+                if all_results:
+                    date_col = next((c for c in all_columns if "制作" in c and "日期" in c), None)
+                    age_col = next((c for c in all_columns if "龄期" in c), None)
+                    site_col = next((c for c in all_columns if "工地" in c), None)
+                    grade_col = next((c for c in all_columns if "等级" in c), None)
+                    pour_col = next((c for c in all_columns if "浇筑" in c or "部位" in c), None)
+
+                    to_docx(all_results, output_path, all_columns, date_col, age_col, site_col, grade_col, pour_col)
+                    self.log(f"✅ 完成！")
+                    self.log(f"📄 结果已保存：{output_path}")
+                    messagebox.showinfo("完成", f"筛选完成！\n\n共处理 {len(files)} 个文件\n合计找到 {len(all_results)} 条记录\n\n已保存到：{output_path}")
                 else:
-                    continue
-                
-                self.log(f"   共 {len(df)} 行数据")
-                
-                # 列名标准化
-                col_map = {col: col.strip().replace(" ", "").replace("\n", "") for col in df.columns}
-                df = df.rename(columns=col_map)
-                
-                if all_columns is None:
-                    all_columns = df.columns
-                
-                results = filter_data(
-                    df,
-                    self.date_start.get(),
-                    self.date_end.get(),
-                    self.age_min.get(),
-                    self.age_max.get(),
-                    self.site_name.get(),
-                    self.grade.get(),
-                    self.pour_part.get()
-                )
-                
-                self.log(f"   符合条件：{len(results)} 条")
-                all_results.extend(results)
-            
-            self.log(f"\n📊 共筛选出 {len(all_results)} 条记录")
-            
-            # 获取列名
-            date_col = next((c for c in all_columns if "制作" in c and "日期" in c), None)
-            age_col = next((c for c in all_columns if "龄期" in c), None)
-            site_col = next((c for c in all_columns if "工地" in c), None)
-            grade_col = next((c for c in all_columns if "等级" in c), None)
-            pour_col = next((c for c in all_columns if "浇筑" in c or "部位" in c), None)
-            
-            to_docx(all_results, output_path, all_columns, date_col, age_col, site_col, grade_col, pour_col)
-            
-            self.log(f"\n✅ 完成！")
-            self.log(f"📄 结果已保存：{output_path}")
-            messagebox.showinfo("完成", f"筛选完成！\n\n共处理 {len(files)} 个文件\n合计找到 {len(all_results)} 条记录\n\n已保存到：{output_path}")
-        
-        else:
-            # 单文件处理
-            self.log(f"📖 读取文件：{input_path}")
+                    to_docx([], output_path, all_columns or [], None, None, None, None, None)
+                    self.log(f"⚠️ 无符合条件的数据")
+                    self.log(f"📄 结果已保存：{output_path}")
+                    messagebox.showinfo("完成", f"筛选完成，但无符合条件的数据\n\n已保存到：{output_path}")
 
-            ext = os.path.splitext(input_path)[1].lower()
-            if ext in [".xlsx", ".xls"]:
-                import pandas as pd
-                df = read_excel(input_path)
-            elif ext == ".csv":
-                import pandas as pd
-                df = read_csv(input_path)
-            elif ext == ".docx":
-                import pandas as pd
-                df = read_docx(input_path)
-                if df is None:
-                    raise Exception("Word文件中未找到表格数据")
             else:
-                raise Exception(f"不支持的文件格式：{ext}")
+                # 单文件处理
+                self.log(f"📖 读取文件：{input_path}")
+                results, cols = self.process_file(input_path, date_start, date_end, age_min, age_max, site_name, grade, pour_part)
 
-            self.log(f"   共 {len(df)} 行数据")
-            self.log(f"   列名：{list(df.columns)}")
-            self.log("")
+                if results is None:
+                    raise Exception("无法读取文件，请确认文件格式正确")
 
-            # 获取列名映射
-            col_map = {col: col.strip().replace(" ", "").replace("\n", "") for col in df.columns}
-            df = df.rename(columns=col_map)
-            date_col = next((c for c in df.columns if "制作" in c and "日期" in c), None)
-            age_col = next((c for c in df.columns if "龄期" in c), None)
-            site_col = next((c for c in df.columns if "工地" in c), None)
-            grade_col = next((c for c in df.columns if "等级" in c), None)
-            pour_col = next((c for c in df.columns if "浇筑" in c or "部位" in c), None)
+                self.log(f"   共 {len(results)} 条记录\n")
 
-            self.log(f"🔍 筛选中...")
-            results = filter_data(
-                df,
-                self.date_start.get(),
-                self.date_end.get(),
-                self.age_min.get(),
-                self.age_max.get(),
-                self.site_name.get(),
-                self.grade.get(),
-                self.pour_part.get()
-            )
+                if results:
+                    date_col = next((c for c in cols if "制作" in c and "日期" in c), None)
+                    age_col = next((c for c in cols if "龄期" in c), None)
+                    site_col = next((c for c in cols if "工地" in c), None)
+                    grade_col = next((c for c in cols if "等级" in c), None)
+                    pour_col = next((c for c in cols if "浇筑" in c or "部位" in c), None)
 
-            self.log(f"   符合条件：{len(results)} 条")
-            self.log("")
-
-            to_docx(results, output_path, df.columns, date_col, age_col, site_col, grade_col, pour_col)
-
-            self.log(f"✅ 完成！")
-            self.log(f"📄 结果已保存：{output_path}")
-            messagebox.showinfo("完成", f"筛选完成！\n\n共找到 {len(results)} 条记录\n\n已保存到：{output_path}")
+                    to_docx(results, output_path, cols, date_col, age_col, site_col, grade_col, pour_col)
+                    self.log(f"✅ 完成！")
+                    self.log(f"📄 结果已保存：{output_path}")
+                    messagebox.showinfo("完成", f"筛选完成！\n\n共找到 {len(results)} 条记录\n\n已保存到：{output_path}")
+                else:
+                    to_docx([], output_path, cols, None, None, None, None, None)
+                    self.log(f"⚠️ 无符合条件的数据")
+                    messagebox.showinfo("完成", "无符合条件的数据")
 
         except Exception as e:
             self.log(f"❌ 错误：{str(e)}")
