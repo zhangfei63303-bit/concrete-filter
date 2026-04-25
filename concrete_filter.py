@@ -1,60 +1,26 @@
 #!/usr/bin/env python3
 """
-混凝土试件记录筛选脚本
-用法：把数据文件拖进来，修改下面的筛选条件，运行即可
-支持 .xlsx .xls .csv .docx
+混凝土试件记录筛选工具 - 可视化界面版
 """
 
 import os
 import sys
-import pandas as pd
-from datetime import datetime, timedelta
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+from datetime import datetime
 
-# ========== 筛选条件（自己改这里） ==========
-# 日期范围：制作日期从 X 到 Y
-DATE_START = "2026-01-01"   # 留空用 ""
-DATE_END = "2026-03-31"
+# ========== 筛选条件（默认参数） ==========
+DEFAULT_AGE_MIN = 50
+DEFAULT_AGE_MAX = 60
+DEFAULT_DATE_START = ""
+DEFAULT_DATE_END = ""
+DEFAULT_SITE_NAME = ""
+DEFAULT_GRADE = ""
+DEFAULT_POUR_PART = ""
 
-# 龄期范围（天）
-AGE_MIN = 50
-AGE_MAX = 60
-
-# 其他条件（留空用 "" 表示不限）
-SITE_NAME = ""          # 工地名称关键词
-GRADE = ""              # 混凝土等级，如 "C50"
-POUR_PART = ""          # 浇筑部位关键词
-
-# 输入输出文件
-INPUT_FILE = "input.xlsx"   # 拖进来改这里
-OUTPUT_FILE = "output.docx"
-# ============================================
-
-
-def read_excel(path):
-    import pandas as pd
-    df = pd.read_excel(path)
-    return df
-
-def read_csv(path):
-    import pandas as pd
-    df = pd.read_csv(path)
-    return df
-
-def read_docx(path):
-    import pandas as pd
-    from docx import Document
-    doc = Document(path)
-    rows = []
-    for table in doc.tables:
-        for row in table.rows:
-            rows.append([cell.text.strip() for cell in row.cells])
-    if not rows:
-        return pd.DataFrame()
-    df = pd.DataFrame(rows[1:], columns=rows[0])
-    return df
 
 def parse_date(s):
-    if pd.isna(s) or str(s).strip() == "":
+    if not s or str(s).strip() == "":
         return None
     s = str(s).strip()
     for fmt in ["%Y-%m-%d", "%Y/%m/%d", "%Y%m%d", "%m/%d/%Y"]:
@@ -64,255 +30,308 @@ def parse_date(s):
             continue
     return None
 
-def calc_age_days(make_date, check_date=None):
-    """计算龄期天数"""
-    d1 = parse_date(make_date)
-    if d1 is None:
+
+def calc_age(make_str):
+    make_date = parse_date(make_str)
+    if not make_date:
         return None
-    if check_date:
-        d2 = parse_date(check_date)
-        if d2:
-            return (d2 - d1).days
-    # 按当前日期推算检测日期（大约龄期）
     today = datetime.now()
-    age = (today - d1).days
+    age = (today - make_date).days
     return age if age > 0 else None
 
-def filter_data(df):
-    # 标准化列名
-    col_map = {}
-    for col in df.columns:
-        c = col.strip().replace(" ", "").replace("\n", "")
-        col_map[col] = c
+
+def read_excel(path):
+    import pandas as pd
+    return pd.read_excel(path)
+
+def read_csv(path):
+    import pandas as pd
+    return pd.read_csv(path)
+
+def read_docx(path):
+    from docx import Document
+    doc = Document(path)
+    rows = []
+    for table in doc.tables:
+        for row in table.rows:
+            rows.append([cell.text.strip() for cell in row.cells])
+    if not rows:
+        return None
+    df = pd.DataFrame(rows[1:], columns=rows[0])
+    return df
+
+def filter_data(df, date_start, date_end, age_min, age_max, site_name, grade, pour_part):
+    col_map = {col: col.strip().replace(" ", "").replace("\n", "") for col in df.columns}
     df = df.rename(columns=col_map)
-    
-    # 找关键列
-    date_col = None
-    age_col = None
-    site_col = None
-    grade_col = None
-    pour_col = None
-    seq_col = None
-    
-    for col in df.columns:
-        c = col.lower()
-        if "日期" in col or "date" in c:
-            if "制作" in col or "make" in c:
-                date_col = col
-            elif "检测" in col or "check" in c or "test" in c:
-                if age_col is None:
-                    age_col = col
-        if "龄期" in col or "age" in c or "天" in col:
-            age_col = col
-        if "工地" in col or "site" in c or "项目" in col:
-            site_col = col
-        if "等级" in col or "grade" in c or "强度" in col:
-            grade_col = col
-        if "浇筑" in col or "pour" in c or "部位" in col:
-            pour_col = col
-        if "序号" in col or "seq" in c or "no" in c:
-            seq_col = col
-    
+
+    date_col = next((c for c in df.columns if "制作" in c and "日期" in c), None)
+    age_col = next((c for c in df.columns if "龄期" in c), None)
+    site_col = next((c for c in df.columns if "工地" in c), None)
+    grade_col = next((c for c in df.columns if "等级" in c), None)
+    pour_col = next((c for c in df.columns if "浇筑" in c or "部位" in c), None)
+
     results = []
-    
     for idx, row in df.iterrows():
-        # 跳过表头
-        if idx == 0 and str(row.iloc[0]).strip() in ["序号", "序列", "NO", "No"]:
+        if idx == 0 and str(row.iloc[0]).strip() in ["序号", "序列", "NO"]:
             continue
-        
-        make_date_str = str(row[date_col]).strip() if date_col and date_col in row.index else ""
-        make_date = parse_date(make_date_str)
-        
-        if make_date is None:
+
+        make_str = str(row[date_col]).strip() if date_col else ""
+        make_date = parse_date(make_str)
+        if not make_date:
             continue
-        
-        # 日期范围筛选
-        start_dt = parse_date(DATE_START) if DATE_START else None
-        end_dt = parse_date(DATE_END) if DATE_END else None
-        
+
+        start_dt = parse_date(date_start) if date_start else None
+        end_dt = parse_date(date_end) if date_end else None
         if start_dt and make_date < start_dt:
             continue
         if end_dt and make_date > end_dt:
             continue
-        
-        # 龄期计算
-        check_date_str = str(row[age_col]).strip() if age_col and age_col in row.index else ""
-        age_days = calc_age_days(make_date_str, check_date_str)
-        
-        if age_days is None:
-            # 尝试从龄期列直接读
-            age_str = str(row[age_col]).strip() if age_col and age_col in row.index else ""
-            if "d" in age_str.lower():
-                try:
-                    age_days = int(age_str.lower().replace("d", "").strip())
-                except:
-                    age_days = 0
-        
-        if age_days < AGE_MIN or age_days > AGE_MAX:
-            continue
-        
-        # 工地名称筛选
-        if SITE_NAME:
-            site_val = str(row[site_col]).strip() if site_col and site_col in row.index else ""
-            if SITE_NAME not in site_val:
-                continue
-        
-        # 等级筛选
-        if GRADE:
-            grade_val = str(row[grade_col]).strip() if grade_col and grade_col in row.index else ""
-            if GRADE not in grade_val:
-                continue
-        
-        # 浇筑部位筛选
-        if POUR_PART:
-            pour_val = str(row[pour_col]).strip() if pour_col and pour_col in row.index else ""
-            if POUR_PART not in pour_val:
-                continue
-        
-        results.append(row)
-    
-    return pd.DataFrame(results)
 
-def to_docx(df, output_path):
+        age_days = calc_age(make_str)
+        if age_days is None or age_days < age_min or age_days > age_max:
+            continue
+
+        if site_name and site_name not in str(row[site_col]).strip() if site_col else "":
+            continue
+        if grade and grade not in str(row[grade_col]).strip() if grade_col else "":
+            continue
+        if pour_part and pour_part not in str(row[pour_col]).strip() if pour_col else "":
+            continue
+
+        results.append((row, age_days))
+
+    return results
+
+
+def to_docx(results, output_path, df_columns, date_col, age_col, site_col, grade_col, pour_col):
     from docx import Document
-    from docx.shared import Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    
+
     doc = Document()
-    
-    # 标题
     title = doc.add_heading("混凝土试件记录筛选表", level=1)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
-    # 条件说明
+
     p = doc.add_paragraph()
-    p.add_run(f"筛选条件：").bold = True
-    conditions = []
-    if DATE_START or DATE_END:
-        conditions.append(f"制作日期：{DATE_START or '开始'} ~ {DATE_END or '至今'}")
-    conditions.append(f"龄期：{AGE_MIN} ~ {AGE_MAX} 天")
-    if SITE_NAME:
-        conditions.append(f"工地：{SITE_NAME}")
-    if GRADE:
-        conditions.append(f"等级：{GRADE}")
-    if POUR_PART:
-        conditions.append(f"浇筑部位：{POUR_PART}")
-    p.add_run(" | ".join(conditions) if conditions else "全部")
-    
-    p = doc.add_paragraph()
-    p.add_run(f"筛选结果：共 {len(df)} 条记录").bold = True
+    p.add_run(f"筛选结果：共 {len(results)} 条记录").bold = True
     p = doc.add_paragraph()
     p.add_run(f"生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    
+
     doc.add_paragraph()
-    
-    # 表格
-    if df.empty:
+
+    if not results:
         doc.add_paragraph("无符合条件的数据")
         doc.save(output_path)
         return
-    
-    # 表头
-    headers = ["序号", "制作日期", "龄期(天)", "检测日期", "等级", "工地名称", "浇筑部位", "备注"]
+
+    headers = ["序号", "制作日期", "龄期(天)", "等级", "工地名称", "浇筑部位"]
     table = doc.add_table(rows=1, cols=len(headers))
     table.style = "Table Grid"
-    
-    hdr_cells = table.rows[0].cells
+
     for i, h in enumerate(headers):
-        hdr_cells[i].text = h
-        hdr_cells[i].paragraphs[0].runs[0].bold = True
-    
-    # 数据行
-    for i, (_, row) in enumerate(df.iterrows(), 1):
+        table.rows[0].cells[i].text = h
+        table.rows[0].cells[i].paragraphs[0].runs[0].bold = True
+
+    for i, (row, age_days) in enumerate(results, 1):
         cells = table.add_row().cells
         cells[0].text = str(i)
-        
-        # 制作日期
-        date_col = [c for c in df.columns if "日期" in c and "制作" in c]
-        make_date = str(row[date_col[0]]).strip() if date_col else ""
-        cells[1].text = make_date
-        
-        # 龄期
-        age_col = [c for c in df.columns if "龄期" in c or "天" in c]
-        if age_col:
-            cells[2].text = str(row[age_col[0]]).strip()
-        else:
-            cells[2].text = ""
-        
-        # 检测日期
-        check_col = [c for c in df.columns if "检测" in c or "试压" in c or "日期" in c]
-        check_col = [c for c in check_col if "制作" not in c]
-        if check_col:
-            cells[3].text = str(row[check_col[0]]).strip()
-        else:
-            cells[3].text = ""
-        
-        # 等级
-        grade_col = [c for c in df.columns if "等级" in c or "强度" in c]
-        cells[4].text = str(row[grade_col[0]]).strip() if grade_col else ""
-        
-        # 工地名称
-        site_col = [c for c in df.columns if "工地" in c or "项目" in c or "名称" in c]
-        cells[5].text = str(row[site_col[0]]).strip() if site_col else ""
-        
-        # 浇筑部位
-        pour_col = [c for c in df.columns if "浇筑" in c or "部位" in c]
-        cells[6].text = str(row[pour_col[0]]).strip() if pour_col else ""
-        
-        # 备注（龄期天数）
-        cells[7].text = f"{AGE_MIN}-{AGE_MAX}天"
-    
+        cells[1].text = str(row[date_col]).strip() if date_col else ""
+        cells[2].text = str(age_days)
+        cells[3].text = str(row[grade_col]).strip() if grade_col else ""
+        cells[4].text = str(row[site_col]).strip() if site_col else ""
+        cells[5].text = str(row[pour_col]).strip() if pour_col else ""
+
     doc.save(output_path)
-    print(f"✅ 已生成：{output_path}")
+
+
+class App:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("混凝土试件记录筛选工具")
+        self.root.geometry("700x500")
+        self.root.resizable(True, True)
+
+        self.input_file = tk.StringVar()
+        self.output_file = tk.StringVar(value="output.docx")
+
+        self.date_start = tk.StringVar(value=DEFAULT_DATE_START)
+        self.date_end = tk.StringVar(value=DEFAULT_DATE_END)
+        self.age_min = tk.IntVar(value=DEFAULT_AGE_MIN)
+        self.age_max = tk.IntVar(value=DEFAULT_AGE_MAX)
+        self.site_name = tk.StringVar(value=DEFAULT_SITE_NAME)
+        self.grade = tk.StringVar(value=DEFAULT_GRADE)
+        self.pour_part = tk.StringVar(value=DEFAULT_POUR_PART)
+
+        self.build_ui()
+
+    def build_ui(self):
+        # 文件选择区
+        frame_file = ttk.LabelFrame(self.root, text="文件选择", padding=10)
+        frame_file.pack(fill="x", padx=10, pady=5)
+
+        ttk.Label(frame_file, text="数据文件：").grid(row=0, column=0, sticky="w")
+        ttk.Entry(frame_file, textvariable=self.input_file, width=50).grid(row=0, column=1, padx=5)
+        ttk.Button(frame_file, text="浏览...", command=self.browse_input).grid(row=0, column=2)
+
+        ttk.Label(frame_file, text="输出文件：").grid(row=1, column=0, sticky="w", pady=(5,0))
+        ttk.Entry(frame_file, textvariable=self.output_file, width=50).grid(row=1, column=1, padx=5, pady=(5,0))
+        ttk.Button(frame_file, text="浏览...", command=self.browse_output).grid(row=1, column=2, pady=(5,0))
+
+        # 筛选条件区
+        frame_cond = ttk.LabelFrame(self.root, text="筛选条件", padding=10)
+        frame_cond.pack(fill="x", padx=10, pady=5)
+
+        # 第一行：日期范围
+        ttk.Label(frame_cond, text="制作日期：").grid(row=0, column=0, sticky="w")
+        ttk.Label(frame_cond, text="从").grid(row=0, column=1)
+        ttk.Entry(frame_cond, textvariable=self.date_start, width=12).grid(row=0, column=2, padx=5)
+        ttk.Label(frame_cond, text="到").grid(row=0, column=3)
+        ttk.Entry(frame_cond, textvariable=self.date_end, width=12).grid(row=0, column=4, padx=5)
+        ttk.Label(frame_cond, text="(留空不限，格式如 2026-01-01)").grid(row=0, column=5, sticky="w", padx=5)
+
+        # 第二行：龄期
+        ttk.Label(frame_cond, text="龄期(天)：").grid(row=1, column=0, sticky="w", pady=(5,0))
+        ttk.Label(frame_cond, text="从").grid(row=1, column=1, pady=(5,0))
+        ttk.Entry(frame_cond, textvariable=self.age_min, width=12).grid(row=1, column=2, padx=5, pady=(5,0))
+        ttk.Label(frame_cond, text="到").grid(row=1, column=3, pady=(5,0))
+        ttk.Entry(frame_cond, textvariable=self.age_max, width=12).grid(row=1, column=4, padx=5, pady=(5,0))
+
+        # 第三行：工地名称
+        ttk.Label(frame_cond, text="工地名称：").grid(row=2, column=0, sticky="w", pady=(5,0))
+        ttk.Entry(frame_cond, textvariable=self.site_name, width=30).grid(row=2, column=1, columnspan=4, sticky="w", padx=5, pady=(5,0))
+        ttk.Label(frame_cond, text="(留空不限)").grid(row=2, column=5, sticky="w", padx=5, pady=(5,0))
+
+        # 第四行：等级
+        ttk.Label(frame_cond, text="混凝土等级：").grid(row=3, column=0, sticky="w", pady=(5,0))
+        ttk.Entry(frame_cond, textvariable=self.grade, width=30).grid(row=3, column=1, columnspan=4, sticky="w", padx=5, pady=(5,0))
+        ttk.Label(frame_cond, text="(如 C50，留空不限)").grid(row=3, column=5, sticky="w", padx=5, pady=(5,0))
+
+        # 第五行：浇筑部位
+        ttk.Label(frame_cond, text="浇筑部位：").grid(row=4, column=0, sticky="w", pady=(5,0))
+        ttk.Entry(frame_cond, textvariable=self.pour_part, width=30).grid(row=4, column=1, columnspan=4, sticky="w", padx=5, pady=(5,0))
+        ttk.Label(frame_cond, text="(留空不限)").grid(row=4, column=5, sticky="w", padx=5, pady=(5,0))
+
+        # 运行按钮
+        frame_btn = ttk.Frame(self.root)
+        frame_btn.pack(pady=15)
+
+        self.btn_run = ttk.Button(frame_btn, text="开始筛选", command=self.run_filter, width=20)
+        self.btn_run.pack()
+
+        # 状态区
+        frame_status = ttk.LabelFrame(self.root, text="状态", padding=10)
+        frame_status.pack(fill="both", expand=True, padx=10, pady=5)
+
+        self.status_text = tk.Text(frame_status, height=8, state="disabled", wrap="word")
+        self.status_text.pack(fill="both", expand=True)
+
+    def browse_input(self):
+        fname = filedialog.askopenfilename(
+            title="选择数据文件",
+            filetypes=[("Excel文件", "*.xlsx *.xls"), ("CSV文件", "*.csv"), ("Word文件", "*.docx"), ("所有文件", "*.*")]
+        )
+        if fname:
+            self.input_file.set(fname)
+            if not self.output_file.get() or self.output_file.get() == "output.docx":
+                base = os.path.splitext(os.path.basename(fname))[0]
+                self.output_file.set(f"{base}_筛选结果.docx")
+
+    def browse_output(self):
+        fname = filedialog.asksaveasfilename(
+            title="保存结果文件",
+            defaultextension=".docx",
+            filetypes=[("Word文件", "*.docx")]
+        )
+        if fname:
+            self.output_file.set(fname)
+
+    def log(self, msg):
+        self.status_text.config(state="normal")
+        self.status_text.insert("end", msg + "\n")
+        self.status_text.see("end")
+        self.status_text.config(state="disabled")
+        self.root.update()
+
+    def run_filter(self):
+        input_path = self.input_file.get().strip()
+        output_path = self.output_file.get().strip()
+
+        if not input_path:
+            messagebox.showerror("错误", "请选择数据文件！")
+            return
+
+        if not os.path.exists(input_path):
+            messagebox.showerror("错误", f"文件不存在：{input_path}")
+            return
+
+        self.btn_run.config(state="disabled", text="处理中...")
+        self.status_text.config(state="normal")
+        self.status_text.delete("1.0", "end")
+        self.status_text.config(state="disabled")
+
+        try:
+            self.log(f"📖 读取文件：{input_path}")
+
+            ext = os.path.splitext(input_path)[1].lower()
+            if ext in [".xlsx", ".xls"]:
+                import pandas as pd
+                df = read_excel(input_path)
+            elif ext == ".csv":
+                import pandas as pd
+                df = read_csv(input_path)
+            elif ext == ".docx":
+                import pandas as pd
+                df = read_docx(input_path)
+                if df is None:
+                    raise Exception("Word文件中未找到表格数据")
+            else:
+                raise Exception(f"不支持的文件格式：{ext}")
+
+            self.log(f"   共 {len(df)} 行数据")
+            self.log(f"   列名：{list(df.columns)}")
+            self.log("")
+
+            # 获取列名映射
+            col_map = {col: col.strip().replace(" ", "").replace("\n", "") for col in df.columns}
+            df = df.rename(columns=col_map)
+            date_col = next((c for c in df.columns if "制作" in c and "日期" in c), None)
+            age_col = next((c for c in df.columns if "龄期" in c), None)
+            site_col = next((c for c in df.columns if "工地" in c), None)
+            grade_col = next((c for c in df.columns if "等级" in c), None)
+            pour_col = next((c for c in df.columns if "浇筑" in c or "部位" in c), None)
+
+            self.log(f"🔍 筛选中...")
+            results = filter_data(
+                df,
+                self.date_start.get(),
+                self.date_end.get(),
+                self.age_min.get(),
+                self.age_max.get(),
+                self.site_name.get(),
+                self.grade.get(),
+                self.pour_part.get()
+            )
+
+            self.log(f"   符合条件：{len(results)} 条")
+            self.log("")
+
+            to_docx(results, output_path, df.columns, date_col, age_col, site_col, grade_col, pour_col)
+
+            self.log(f"✅ 完成！")
+            self.log(f"📄 结果已保存：{output_path}")
+            messagebox.showinfo("完成", f"筛选完成！\n\n共找到 {len(results)} 条记录\n\n已保存到：{output_path}")
+
+        except Exception as e:
+            self.log(f"❌ 错误：{str(e)}")
+            messagebox.showerror("错误", str(e))
+
+        finally:
+            self.btn_run.config(state="normal", text="开始筛选")
+
 
 def main():
-    if len(sys.argv) > 1:
-        INPUT_FILE = sys.argv[1]
-    if len(sys.argv) > 2:
-        OUTPUT_FILE = sys.argv[2]
-    
-    print(f"\n{'='*50}")
-    print("🏗️  混凝土试件记录筛选脚本")
-    print(f"{'='*50}")
-    print(f"输入文件：{INPUT_FILE}")
-    print(f"输出文件：{OUTPUT_FILE}")
-    print(f"{'='*50}\n")
-    
-    if not os.path.exists(INPUT_FILE):
-        print(f"❌ 文件不存在：{INPUT_FILE}")
-        print("\n用法：")
-        print("  python concrete_filter.py                      # 使用默认文件名")
-        print("  python concrete_filter.py mydata.xlsx          # 指定输入文件")
-        print("  python concrete_filter.py mydata.xlsx out.docx # 指定输入输出")
-        return
-    
-    # 读取数据
-    ext = os.path.splitext(INPUT_FILE)[1].lower()
-    print(f"📖 读取 {ext} 文件...")
-    
-    if ext in [".xlsx", ".xls"]:
-        df = read_excel(INPUT_FILE)
-    elif ext == ".csv":
-        df = read_csv(INPUT_FILE)
-    elif ext == ".docx":
-        df = read_docx(INPUT_FILE)
-    else:
-        print(f"❌ 不支持的文件格式：{ext}")
-        return
-    
-    print(f"   共 {len(df)} 行数据")
-    print(f"   列名：{list(df.columns)}\n")
-    
-    # 筛选
-    print("🔍 筛选中...")
-    result = filter_data(df)
-    print(f"   符合条件：{len(result)} 条\n")
-    
-    # 输出
-    to_docx(result, OUTPUT_FILE)
-    print(f"\n📄 Word文档已生成：{OUTPUT_FILE}")
-    print("\n按回车键退出...")
-    input()
+    root = tk.Tk()
+    app = App(root)
+    root.mainloop()
 
 
 if __name__ == "__main__":
