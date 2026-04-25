@@ -54,28 +54,69 @@ def read_csv(path):
 
 
 def read_doc(path):
-    """使用textract读取旧版.doc文件"""
+    """手动解析旧版.doc文件（无需额外依赖）"""
     try:
-        import textract
-        text = textract.process(path, method="pywin32")
         import pandas as pd
-        lines = text.decode("utf-8", errors="ignore").strip().split("\n")
+        with open(path, "rb") as f:
+            raw = f.read()
+        
+        # 尝试用多种编码解码
+        text = None
+        for enc in ["gbk", "gb2312", "utf-8", "latin1"]:
+            try:
+                text = raw.decode(enc, errors="ignore")
+                if "\x00" in text:
+                    text = raw.decode(enc).replace("\x00", "")
+                break
+            except:
+                continue
+        
+        if text is None:
+            return None
+        
+        lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
         header_idx = -1
         for i, line in enumerate(lines):
-            if "序号" in line and "制作日期" in line:
+            if "序号" in line and ("制作日期" in line or "检测日期" in line):
                 header_idx = i
                 break
+        
         if header_idx < 0:
             return None
-        data = []
+        
+        data_rows = []
         for line in lines[header_idx:]:
             cols = [c.strip() for c in line.split("|")]
-            if len(cols) > 1:
-                data.append(cols)
-        if not data:
+            if len(cols) < 3:
+                cols = [c.strip() for c in line.split("\t")]
+            if len(cols) >= 3:
+                first = cols[0].strip()
+                if first.isdigit() or (first and first[0] in "123456789"):
+                    data_rows.append(cols)
+        
+        if not data_rows:
             return None
-        headers = data[0]
-        df = pd.DataFrame(data[1:], columns=headers)
+        
+        max_cols = max(len(row) for row in data_rows)
+        normalized = []
+        for row in data_rows:
+            if len(row) < max_cols:
+                row = row + [""] * (max_cols - len(row))
+            normalized.append(row[:max_cols])
+        
+        headers = normalized[0]
+        df = pd.DataFrame(normalized[1:], columns=headers)
+        
+        col_map = {}
+        for col in df.columns:
+            if "制作日期" in col: col_map[col] = "制作日期"
+            elif "检测日期" in col: col_map[col] = "检测日期"
+            elif "龄期" in col: col_map[col] = "龄期"
+            elif "等级" in col: col_map[col] = "等级"
+            elif "工地" in col or "项目" in col: col_map[col] = "工地名称"
+            elif "浇筑" in col or "部位" in col: col_map[col] = "浇筑部位"
+        df.rename(columns=col_map, inplace=True)
+        
         return df
     except Exception as e:
         return None
