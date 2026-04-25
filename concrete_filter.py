@@ -52,6 +52,35 @@ def read_csv(path):
     return pd.read_csv(path)
 
 
+
+def read_doc(path):
+    """使用textract读取旧版.doc文件"""
+    try:
+        import textract
+        text = textract.process(path, method="pywin32")
+        import pandas as pd
+        lines = text.decode("utf-8", errors="ignore").strip().split("\n")
+        header_idx = -1
+        for i, line in enumerate(lines):
+            if "序号" in line and "制作日期" in line:
+                header_idx = i
+                break
+        if header_idx < 0:
+            return None
+        data = []
+        for line in lines[header_idx:]:
+            cols = [c.strip() for c in line.split("|")]
+            if len(cols) > 1:
+                data.append(cols)
+        if not data:
+            return None
+        headers = data[0]
+        df = pd.DataFrame(data[1:], columns=headers)
+        return df
+    except Exception as e:
+        return None
+
+
 def read_docx(path):
     from docx import Document
     doc = Document(path)
@@ -242,6 +271,7 @@ class App:
                 ("CSV文件", "*.csv"),
                 ("Word文件", "*.docx"),
                 ("所有文件", "*.*")
+                ("Word旧版", "*.doc")
             ]
         )
         if not fname:
@@ -325,12 +355,12 @@ class App:
             if os.path.isdir(input_path):
                 # 文件夹批量处理
                 self.log(f"📁 检测到文件夹：{input_path}")
-                supported_ext = ['.xlsx', '.xls', '.csv', '.docx']
+                supported_ext = ['.xlsx', '.xls', '.csv', '.docx', '.doc']
                 files = [os.path.join(input_path, f) for f in os.listdir(input_path)
                          if any(f.lower().endswith(ext) for ext in supported_ext)]
 
                 if not files:
-                    raise Exception(f"文件夹中未找到支持的数据文件(.xlsx/.xls/.csv/.docx)")
+                    raise Exception(f"文件夹中未找到支持的数据文件(.xlsx/.xls/.csv/.docx/.doc)")
 
                 self.log(f"   找到 {len(files)} 个数据文件\n")
 
