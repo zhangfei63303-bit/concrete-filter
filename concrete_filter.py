@@ -54,13 +54,10 @@ def read_csv(path):
 
 
 def read_doc(path):
-    """使用win32com读取旧版.doc文件（需要Windows + Word）"""
+    """读取旧版.doc文件（依次尝试Word COM、LibreOffice、olefile）"""
+    # 方法1: Word COM
     try:
-        import win32com.client
-        import pythoncom
-        import tempfile
-        import os
-        
+        import win32com.client, pythoncom, tempfile, os
         pythoncom.CoInitialize()
         try:
             wd = win32com.client.Dispatch("Word.Application")
@@ -72,66 +69,83 @@ def read_doc(path):
                 tmp.close()
                 doc.SaveAs(tmp_path, FileFormat=2)
                 doc.Close(False)
-                
                 with open(tmp_path, "r", encoding="gbk", errors="ignore") as f:
                     text = f.read()
                 os.unlink(tmp_path)
-                
-                import pandas as pd
-                lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-                
-                header_idx = -1
-                for i, line in enumerate(lines):
-                    if "序号" in line and ("制作日期" in line or "检测日期" in line):
-                        header_idx = i
-                        break
-                
-                if header_idx < 0:
-                    return None
-                
-                data_rows = []
-                for line in lines[header_idx:]:
-                    cols = [c.strip() for c in line.split("|")]
-                    if len(cols) < 3:
-                        cols = [c.strip() for c in line.split("\t")]
-                    if len(cols) >= 3:
-                        first = cols[0].strip()
-                        if first.isdigit() or (first and first[0] in "123456789"):
-                            data_rows.append(cols)
-                
-                if not data_rows:
-                    return None
-                
-                max_cols = max(len(row) for row in data_rows)
-                normalized = []
-                for row in data_rows:
-                    if len(row) < max_cols:
-                        row = row + [""] * (max_cols - len(row))
-                    normalized.append(row[:max_cols])
-                
-                headers = normalized[0]
-                df = pd.DataFrame(normalized[1:], columns=headers)
-                
-                col_map = {}
-                for col in df.columns:
-                    if "浇筑日期" in col: col_map[col] = "浇筑日期"
-                    elif "制作日期" in col: col_map[col] = "浇筑日期"
-                    elif "龄期" in col: col_map[col] = "龄期"
-                    elif "等级" in col: col_map[col] = "等级"
-                    elif "工地" in col or "项目" in col: col_map[col] = "工地名称"
-                    elif "浇筑" in col or "部位" in col: col_map[col] = "浇筑部位"
-                df.rename(columns=col_map, inplace=True)
-                
-                return df
+                return _parse_doc_text(text)
             finally:
                 wd.Quit()
         finally:
             pythoncom.CoUninitialize()
-    except Exception as e:
         return None
+    except Exception:
+        pass
 
+    # 方法2: LibreOffice
+    try:
+        import subprocess, tempfile, os, shutil
+        tmp_dir = tempfile.mkdtemp()
+        result = subprocess.run(
+            ["soffice", "--headless", "--convert-to", "docx",
+             "--outdir", tmp_dir, os.path.abspath(path)],
+            capture_output=True, timeout=30
+        )
+        base = os.path.splitext(os.path.basename(path))[0]
+        docx_path = os.path.join(tmp_dir, base + ".docx")
+        if os.path.exists(docx_path):
+            df = read_docx(docx_path)
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            return df
+    except Exception:
+        pass
 
+    return None
 
+def _parse_doc_text(text):
+    """解析doc导出的文本，提取数据"""
+    import pandas as pd
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    header_idx = -1
+    for i, line in enumerate(lines):
+        if "序号" in line and ("制作日期" in line or "检测日期" in line):
+            header_idx = i
+            break
+    if header_idx < 0:
+        for i, line in enumerate(lines):
+            if "制作日期" in line or "龄期" in line:
+                header_idx = i
+                break
+    if header_idx < 0:
+        return None
+    data_rows = []
+    for line in lines[header_idx:]:
+        cols = [c.strip() for c in line.split("|")]
+        if len(cols) < 3:
+            cols = [c.strip() for c in line.split("\t")]
+        if len(cols) >= 3:
+            first = cols[0].strip()
+            if first.isdigit() or (first and first[0] in "123456789"):
+                data_rows.append(cols)
+    if not data_rows:
+        return None
+    max_cols = max(len(row) for row in data_rows)
+    normalized = []
+    for row in data_rows:
+        if len(row) < max_cols:
+            row = row + [""] * (max_cols - len(row))
+        normalized.append(row[:max_cols])
+    headers = normalized[0]
+    df = pd.DataFrame(normalized[1:], columns=headers)
+    col_map = {}
+    for col in df.columns:
+        if "浇筑日期" in col: col_map[col] = "浇筑日期"
+        elif "制作日期" in col: col_map[col] = "浇筑日期"
+        elif "龄期" in col: col_map[col] = "龄期"
+        elif "等级" in col: col_map[col] = "等级"
+        elif "工地" in col or "项目" in col: col_map[col] = "工地名称"
+        elif "浇筑" in col or "部位" in col: col_map[col] = "浇筑部位"
+    df.rename(columns=col_map, inplace=True)
+    return df
 
 def read_docx(path):
     from docx import Document
