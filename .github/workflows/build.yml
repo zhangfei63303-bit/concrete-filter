@@ -14,7 +14,7 @@ jobs:
           python-version: '3.11'
       - name: Install dependencies
         run: |
-          pip install pandas python-docx pyinstaller
+          pip install pandas python-docx pyinstaller pywin32
       - name: Build executable
         run: pyinstaller --onefile --name concrete_filter concrete_filter.py
       - name: Upload artifact
