@@ -394,6 +394,8 @@ class App:
             df = read_csv(fpath)
         elif ext == ".docx":
             df = read_docx(fpath)
+        elif ext == ".doc":
+            df = read_doc(fpath)
             if df is None:
                 return None, None
         else:
