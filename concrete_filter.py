@@ -12,8 +12,8 @@ from datetime import datetime
 
 
 # ========== 默认筛选参数 ==========
-DEFAULT_AGE_MIN = 50
-DEFAULT_AGE_MAX = 60
+DEFAULT_AGE_MIN = 40
+DEFAULT_AGE_MAX = 50
 DEFAULT_DATE_START = ""
 DEFAULT_DATE_END = ""
 DEFAULT_SITE_NAME = ""
