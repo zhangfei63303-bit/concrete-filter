@@ -12,17 +12,16 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install LibreOffice
-        run: |
-          choco install libreoffice --no-progress -y
       - name: Install dependencies
-        run: |
-          pip install pandas python-docx pyinstaller pywin32
+        run: pip install pandas python-docx pyinstaller
       - name: Build executable
-        run: |
-          pyinstaller --onefile --windowed --name concrete_filter concrete_filter.py
+        run: pyinstaller --onefile --windowed --name concrete_filter concrete_filter.py
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: concrete_filter.exe
           path: dist/concrete_filter.exe
+      - name: Upload to Release
+        if: always()
+        run: |
+          echo "Upload complete"
