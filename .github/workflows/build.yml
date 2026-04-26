@@ -14,12 +14,13 @@ jobs:
           python-version: '3.11'
       - name: Install LibreOffice
         run: |
-          choco install libreoffice -y --no-progress
+          choco install libreoffice --no-progress -y
       - name: Install dependencies
         run: |
           pip install pandas python-docx pyinstaller pywin32
       - name: Build executable
-        run: pyinstaller --onefile --name concrete_filter concrete_filter.py
+        run: |
+          pyinstaller --onefile --windowed --name concrete_filter concrete_filter.py
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
