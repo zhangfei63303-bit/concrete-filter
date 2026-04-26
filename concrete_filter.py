@@ -54,72 +54,83 @@ def read_csv(path):
 
 
 def read_doc(path):
-    """手动解析旧版.doc文件（无需额外依赖）"""
+    """使用win32com读取旧版.doc文件（需要Windows + Word）"""
     try:
-        import pandas as pd
-        with open(path, "rb") as f:
-            raw = f.read()
+        import win32com.client
+        import pythoncom
+        import tempfile
+        import os
         
-        # 尝试用多种编码解码
-        text = None
-        for enc in ["gbk", "gb2312", "utf-8", "latin1"]:
+        pythoncom.CoInitialize()
+        try:
+            wd = win32com.client.Dispatch("Word.Application")
+            wd.Visible = False
             try:
-                text = raw.decode(enc, errors="ignore")
-                if "\x00" in text:
-                    text = raw.decode(enc).replace("\x00", "")
-                break
-            except:
-                continue
-        
-        if text is None:
-            return None
-        
-        lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-        header_idx = -1
-        for i, line in enumerate(lines):
-            if "序号" in line and ("制作日期" in line or "检测日期" in line):
-                header_idx = i
-                break
-        
-        if header_idx < 0:
-            return None
-        
-        data_rows = []
-        for line in lines[header_idx:]:
-            cols = [c.strip() for c in line.split("|")]
-            if len(cols) < 3:
-                cols = [c.strip() for c in line.split("\t")]
-            if len(cols) >= 3:
-                first = cols[0].strip()
-                if first.isdigit() or (first and first[0] in "123456789"):
-                    data_rows.append(cols)
-        
-        if not data_rows:
-            return None
-        
-        max_cols = max(len(row) for row in data_rows)
-        normalized = []
-        for row in data_rows:
-            if len(row) < max_cols:
-                row = row + [""] * (max_cols - len(row))
-            normalized.append(row[:max_cols])
-        
-        headers = normalized[0]
-        df = pd.DataFrame(normalized[1:], columns=headers)
-        
-        col_map = {}
-        for col in df.columns:
-            if "制作日期" in col: col_map[col] = "制作日期"
-            elif "检测日期" in col: col_map[col] = "检测日期"
-            elif "龄期" in col: col_map[col] = "龄期"
-            elif "等级" in col: col_map[col] = "等级"
-            elif "工地" in col or "项目" in col: col_map[col] = "工地名称"
-            elif "浇筑" in col or "部位" in col: col_map[col] = "浇筑部位"
-        df.rename(columns=col_map, inplace=True)
-        
-        return df
+                doc = wd.Documents.Open(os.path.abspath(path), ReadOnly=True)
+                tmp = tempfile.NamedTemporaryFile(suffix=".txt", delete=False, encoding="gbk")
+                tmp_path = tmp.name
+                tmp.close()
+                doc.SaveAs(tmp_path, FileFormat=2)
+                doc.Close(False)
+                
+                with open(tmp_path, "r", encoding="gbk", errors="ignore") as f:
+                    text = f.read()
+                os.unlink(tmp_path)
+                
+                import pandas as pd
+                lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+                
+                header_idx = -1
+                for i, line in enumerate(lines):
+                    if "序号" in line and ("制作日期" in line or "检测日期" in line):
+                        header_idx = i
+                        break
+                
+                if header_idx < 0:
+                    return None
+                
+                data_rows = []
+                for line in lines[header_idx:]:
+                    cols = [c.strip() for c in line.split("|")]
+                    if len(cols) < 3:
+                        cols = [c.strip() for c in line.split("\t")]
+                    if len(cols) >= 3:
+                        first = cols[0].strip()
+                        if first.isdigit() or (first and first[0] in "123456789"):
+                            data_rows.append(cols)
+                
+                if not data_rows:
+                    return None
+                
+                max_cols = max(len(row) for row in data_rows)
+                normalized = []
+                for row in data_rows:
+                    if len(row) < max_cols:
+                        row = row + [""] * (max_cols - len(row))
+                    normalized.append(row[:max_cols])
+                
+                headers = normalized[0]
+                df = pd.DataFrame(normalized[1:], columns=headers)
+                
+                col_map = {}
+                for col in df.columns:
+                    if "制作日期" in col: col_map[col] = "制作日期"
+                    elif "检测日期" in col: col_map[col] = "检测日期"
+                    elif "龄期" in col: col_map[col] = "龄期"
+                    elif "等级" in col: col_map[col] = "等级"
+                    elif "工地" in col or "项目" in col: col_map[col] = "工地名称"
+                    elif "浇筑" in col or "部位" in col: col_map[col] = "浇筑部位"
+                df.rename(columns=col_map, inplace=True)
+                
+                return df
+            finally:
+                wd.Quit()
+        finally:
+            pythoncom.CoUninitialize()
     except Exception as e:
         return None
+
+
 
 
 def read_docx(path):
