@@ -114,8 +114,8 @@ def read_doc(path):
                 
                 col_map = {}
                 for col in df.columns:
-                    if "制作日期" in col: col_map[col] = "制作日期"
-                    elif "检测日期" in col: col_map[col] = "检测日期"
+                    if "浇筑日期" in col: col_map[col] = "浇筑日期"
+                    elif "制作日期" in col: col_map[col] = "浇筑日期"
                     elif "龄期" in col: col_map[col] = "龄期"
                     elif "等级" in col: col_map[col] = "等级"
                     elif "工地" in col or "项目" in col: col_map[col] = "工地名称"
@@ -151,7 +151,13 @@ def filter_data(df, date_start, date_end, age_min, age_max, site_name, grade, po
     col_map = {col: col.strip().replace(" ", "").replace("\n", "") for col in df.columns}
     df = df.rename(columns=col_map)
 
-    date_col = next((c for c in df.columns if "制作" in c and "日期" in c), None)
+    # 找各列：日期、龄期、工地、等级、浇筑部位
+    # 日期列优先：浇筑日期 或 制作日期
+    date_col = next((c for c in df.columns if "浇筑日期" in c), None)
+    if not date_col:
+        date_col = next((c for c in df.columns if "制作" in c and "日期" in c), None)
+    
+    # 龄期列
     age_col = next((c for c in df.columns if "龄期" in c), None)
     site_col = next((c for c in df.columns if "工地" in c), None)
     grade_col = next((c for c in df.columns if "等级" in c), None)
@@ -159,31 +165,53 @@ def filter_data(df, date_start, date_end, age_min, age_max, site_name, grade, po
 
     results = []
     for idx, row in df.iterrows():
-        if idx == 0 and str(row.iloc[0]).strip() in ["序号", "序列", "NO"]:
+        if idx == 0 and str(row.iloc[0]).strip() in ["序号", "序列", "NO", "编号"]:
             continue
 
-        make_str = str(row[date_col]).strip() if date_col else ""
-        make_date = parse_date(make_str)
-        if not make_date:
+        # 日期过滤
+        if date_col:
+            date_str = str(row[date_col]).strip()
+            make_date = parse_date(date_str)
+            if make_date:
+                start_dt = parse_date(date_start) if date_start else None
+                end_dt = parse_date(date_end) if date_end else None
+                if start_dt and make_date < start_dt:
+                    continue
+                if end_dt and make_date > end_dt:
+                    continue
+
+        # 龄期过滤：优先用已有的龄期列
+        age_days = None
+        if age_col:
+            age_str = str(row[age_col]).strip()
+            # 尝试提取数字
+            import re
+            nums = re.findall(r'\d+', age_str)
+            if nums:
+                age_days = int(nums[0])
+        
+        # 如果没有龄期列，用日期计算
+        if age_days is None and date_col:
+            age_days = calc_age(str(row[date_col]).strip())
+        
+        if age_days is None:
+            continue
+        
+        if age_days < age_min or age_days > age_max:
             continue
 
-        start_dt = parse_date(date_start) if date_start else None
-        end_dt = parse_date(date_end) if date_end else None
-        if start_dt and make_date < start_dt:
-            continue
-        if end_dt and make_date > end_dt:
-            continue
-
-        age_days = calc_age(make_str)
-        if age_days is None or age_days < age_min or age_days > age_max:
-            continue
-
-        if site_name and site_name not in str(row[site_col]).strip() if site_col else "":
-            continue
-        if grade and grade not in str(row[grade_col]).strip() if grade_col else "":
-            continue
-        if pour_part and pour_part not in str(row[pour_col]).strip() if pour_col else "":
-            continue
+        # 工地名称过滤
+        if site_name and site_col:
+            if site_name not in str(row[site_col]).strip():
+                continue
+        # 等级过滤
+        if grade and grade_col:
+            if grade not in str(row[grade_col]).strip():
+                continue
+        # 浇筑部位过滤
+        if pour_part and pour_col:
+            if pour_part not in str(row[pour_col]).strip():
+                continue
 
         results.append((row, age_days))
 
@@ -210,7 +238,7 @@ def to_docx(results, output_path, all_columns, date_col, age_col, site_col, grad
         doc.save(output_path)
         return
 
-    headers = ["序号", "制作日期", "龄期(天)", "等级", "工地名称", "浇筑部位"]
+    headers = ["编号", "浇筑日期", "龄期(天)", "等级", "工地名称", "浇筑部位"]
     table = doc.add_table(rows=1, cols=len(headers))
     table.style = "Table Grid"
 
@@ -438,7 +466,7 @@ class App:
                 self.log(f"\n📊 共筛选出 {len(all_results)} 条记录")
 
                 if all_results:
-                    date_col = next((c for c in all_columns if "制作" in c and "日期" in c), None)
+                    date_col = next((c for c in all_columns if "浇筑日期" in c), None) or next((c for c in all_columns if "制作" in c and "日期" in c), None)
                     age_col = next((c for c in all_columns if "龄期" in c), None)
                     site_col = next((c for c in all_columns if "工地" in c), None)
                     grade_col = next((c for c in all_columns if "等级" in c), None)
@@ -465,7 +493,7 @@ class App:
                 self.log(f"   共 {len(results)} 条记录\n")
 
                 if results:
-                    date_col = next((c for c in cols if "制作" in c and "日期" in c), None)
+                    date_col = next((c for c in cols if "浇筑日期" in c), None) or next((c for c in cols if "制作" in c and "日期" in c), None)
                     age_col = next((c for c in cols if "龄期" in c), None)
                     site_col = next((c for c in cols if "工地" in c), None)
                     grade_col = next((c for c in cols if "等级" in c), None)
